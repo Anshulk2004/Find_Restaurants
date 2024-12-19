@@ -204,3 +204,4 @@ if __name__ == "__main__":
         save_to_csv(scraped_data, args.query)  # Pass the search_query argument here
     else:
         print("No data scraped.")
+

@@ -14,7 +14,7 @@ def setup_driver():
     service = Service("./chromedriver.exe")
     options = webdriver.ChromeOptions()
     options.add_argument("--start-maximized")
-    options.add_argument("--headless")  # Run in headless mode for Streamlit
+    options.add_argument("--headless")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     return webdriver.Chrome(service=service, options=options)
 
@@ -33,7 +33,6 @@ def scrape_google_top_places(search_query, max_results=10):
         search_box.send_keys(Keys.RETURN)
         time.sleep(3)
 
-        # Find the "Places" section
         st.write("Searching for Top Places section...")
         places_section = wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Places')]")))
         st.write("Top Places section found. Extracting data...")
@@ -44,22 +43,19 @@ def scrape_google_top_places(search_query, max_results=10):
         try:
             more_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='More places']")))
             more_button.click()
-            time.sleep(3)  # Wait for more places to load
+            time.sleep(3)
         except (NoSuchElementException, TimeoutException):
             st.warning("Could not find 'More Places' button. Proceeding with available results.")
 
-        # Click on "More Places" to load more results
+        
         while len(results) < max_results:
-            place_cards = driver.find_elements(By.XPATH, "//div[@class='VkpGBb']")
-            
-            # Extract restaurants from current page
+            place_cards = driver.find_elements(By.XPATH, "//div[@class='VkpGBb']")            
             for card in place_cards:
                 if len(results) >= max_results:
                     progress_bar.progress(1.0)
                     progress_text.write(f"Progress: {max_results}/{max_results} restaurants")
                     break
-                try:
-                    # Extract Name
+                try:                    
                     name = card.find_element(By.CSS_SELECTOR, "div.dbg0pd").text
 
                     if name in seen_restaurants:
@@ -84,7 +80,6 @@ def scrape_google_top_places(search_query, max_results=10):
                             except:
                                 phone_number = "Phone Not Available"
                             
-                    # Extract Price per Person
                     try:
                         price_element = driver.find_element(By.XPATH, "//div[@class='MNVeJb lnxHfb']//span[contains(text(), '₹')]")
                         price_per_person = price_element.text
@@ -103,8 +98,7 @@ def scrape_google_top_places(search_query, max_results=10):
                     
                     if not price_per_person or price_per_person.strip() == '':
                         price_per_person = "N/A"
-
-                    # Extract Service Options
+                    
                     try:
                         service_options_element = driver.find_element(By.CSS_SELECTOR, "div[data-attrid='kc:/local:business_availability_modes']")
                         service_options = service_options_element.text.replace("Service options: ", "")
@@ -115,22 +109,17 @@ def scrape_google_top_places(search_query, max_results=10):
                         except:
                             service_options = "Service Options Not Available"
 
-                    details_element = card.find_elements(By.CSS_SELECTOR, "div.rllt__details")
+                    details_element = card.find_elements(By.CSS_SELECTOR, "div.rllt__details")                    
                     
-                    # Try new address extraction method first
                     try:
                         address_element = driver.find_element(By.XPATH, "//div[@data-attrid='kc:/location/location:address']//span[@class='LrzXr']")
                         location = address_element.text
                     except:
-                        # Fallback to previous method
+                        
                         if details_element:
-                            full_details = details_element[0].text
-                            
-                            # Extract Rating
+                            full_details = details_element[0].text                            
                             rating_match = re.search(r'(\d+\.\d+)', full_details)
-                            rating = rating_match.group(1) if rating_match else "N/A"
-                            
-                            # Extract Location
+                            rating = rating_match.group(1) if rating_match else "N/A"                            
                             location_lines = full_details.split('\n')
                             location_candidates = [
                                 line for line in location_lines
@@ -147,13 +136,10 @@ def scrape_google_top_places(search_query, max_results=10):
                             rating = rating_match.group(1) if rating_match else "N/A"
                         else:
                             rating = "N/A"
-
-                    # Update progress bar in Streamlit
+                    
                     current_progress = min(len(results) / max_results, 1.0)
                     progress_bar.progress(current_progress)
-                    progress_text.write(f"Progress: {len(results)}/{max_results} restaurants")
-                    
-                    # Append restaurant data
+                    progress_text.write(f"Progress: {len(results)}/{max_results} restaurants")                   
                     results.append({
                         "Name": name,
                         "Rating": rating,
@@ -167,7 +153,6 @@ def scrape_google_top_places(search_query, max_results=10):
                     st.warning(f"Error extracting details for one restaurant: {str(e)}")
                     continue
 
-            # Click "More Places" to load additional results
             try:
                 more_button = driver.find_element(By.XPATH, "//span[text()='More places']")
                 more_button.click()
@@ -188,50 +173,35 @@ def scrape_google_top_places(search_query, max_results=10):
 def main():
     st.set_page_config(page_title="Restaurant Finder", layout="wide")
     
-    # Title and Description
     st.title("🍽️ Top Restaurants At Your Region")
     st.markdown("""
     Discover the best restaurants in your area! Enter a location and get detailed information about top-rated restaurants.
-    """)
-    
-    # Create a form for user input
+    """)    
     with st.form("restaurant_search_form"):
-        # Two-column layout for input fields
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            # Location input
+            
             location = st.text_input("Enter City/Region", 
-                                   placeholder="e.g., Mumbai, Delhi, Bangalore")
-        
-        with col2:
-            # Max results slider
+                                   placeholder="e.g., Mumbai, Delhi, Bangalore")        
+        with col2:            
             max_results = st.slider("Number of Restaurants to Show", 
                                   min_value=1, 
                                   max_value=50, 
                                   value=3, 
-                                  step=3)
-        
-        # Submit button
-        search_button = st.form_submit_button("Search Restaurants 🔍")
+                                  step=3)        
+        search_button = st.form_submit_button("Search Restaurants 🔍")    
     
-    # Process the search when form is submitted
     if search_button and location:
-        try:
-            # Show loading spinner
-            with st.spinner(f'Searching for top restaurants in {location}...'):
-                # Construct search query
-                search_query = f"Top restaurants in {location}"
-                
-                # Perform scraping
+        try:            
+            with st.spinner(f'Searching for top restaurants in {location}...'):                
+                search_query = f"Top restaurants in {location}"                
                 results = scrape_google_top_places(search_query, max_results)
                 
-                if results:
-                    # Convert results to DataFrame
+                if results:                    
                     df = pd.DataFrame(results)
                     df.index = range(1, len(df) + 1)
-                    
-                    # Rename columns for better display
                     df.columns = [
                         "Restaurant Name",
                         "Rating",
@@ -239,20 +209,14 @@ def main():
                         "Phone Number",
                         "Price Range",
                         "Available Services"
-                    ]
-                    
-                    # Success message
-                    st.success(f"Found {len(results)} restaurants in {location}!")
-                    
-                    # Display results in a table
+                    ]                    
+                    st.success(f"Found {len(results)} restaurants in {location}!")                    
                     st.markdown("### 📋 Restaurant Details")
                     st.dataframe(
                         df,
                         use_container_width=True,
                         hide_index=True
-                    )
-                    
-                    # Add download button
+                    )                    
                     csv = df.to_csv(index=True).encode('utf-8')
                     st.download_button(
                         label="Download Results as CSV",
@@ -265,9 +229,8 @@ def main():
                     
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
-            st.warning("Please try again or try a different location.")
+            st.warning("Please try again or try a different location.")    
     
-    # Add footer with information
     st.markdown("""
     ---
     ℹ️ *This app scrapes real-time data from Google Places. Results may vary based on availability and current Google Places data.*
