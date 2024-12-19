@@ -1,24 +1,23 @@
+import streamlit as st
+import pandas as pd
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import time
-import csv
 import re
 
-# Setup ChromeDriver with options
 def setup_driver():
-    driver_path = "./chromedriver.exe"
-    service = Service(driver_path)
+    service = Service("./chromedriver.exe")
     options = webdriver.ChromeOptions()
     options.add_argument("--start-maximized")
+    options.add_argument("--headless")  # Run in headless mode for Streamlit
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     return webdriver.Chrome(service=service, options=options)
 
-# Scrape Google Places data with "More Places" click
 def scrape_google_top_places(search_query, max_results=10):
     driver = setup_driver()
     wait = WebDriverWait(driver, 10)
@@ -26,7 +25,6 @@ def scrape_google_top_places(search_query, max_results=10):
     seen_restaurants = set()
 
     try:
-        
         driver.get("https://www.google.com")
         time.sleep(2)
 
@@ -36,25 +34,29 @@ def scrape_google_top_places(search_query, max_results=10):
         time.sleep(3)
 
         # Find the "Places" section
-        print("Searching for Top Places section...")
+        st.write("Searching for Top Places section...")
         places_section = wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Places')]")))
-        print("Top Places section found. Extracting data...")
+        st.write("Top Places section found. Extracting data...")
+
+        progress_bar = st.progress(0)
+        progress_text = st.empty()
 
         try:
             more_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='More places']")))
             more_button.click()
             time.sleep(3)  # Wait for more places to load
         except (NoSuchElementException, TimeoutException):
-            print("Could not find 'More Places' button. Proceeding with available results.")
+            st.warning("Could not find 'More Places' button. Proceeding with available results.")
 
         # Click on "More Places" to load more results
         while len(results) < max_results:
-            
             place_cards = driver.find_elements(By.XPATH, "//div[@class='VkpGBb']")
             
             # Extract restaurants from current page
             for card in place_cards:
                 if len(results) >= max_results:
+                    progress_bar.progress(1.0)
+                    progress_text.write(f"Progress: {max_results}/{max_results} restaurants")
                     break
                 try:
                     # Extract Name
@@ -77,7 +79,6 @@ def scrape_google_top_places(search_query, max_results=10):
                         try:
                             phone_number = driver.find_element(By.CSS_SELECTOR, "div.p3Ci").text
                         except:
-                            # Add fallback for phone
                             try:
                                 phone_number = driver.find_element(By.CSS_SELECTOR, "div[data-attrid='kc:/local:alt phone'] span.LrzXr").text
                             except:
@@ -85,15 +86,12 @@ def scrape_google_top_places(search_query, max_results=10):
                             
                     # Extract Price per Person
                     try:
-                        # First try the specific XPath for price extraction
                         price_element = driver.find_element(By.XPATH, "//div[@class='MNVeJb lnxHfb']//span[contains(text(), '₹')]")
                         price_per_person = price_element.text
                         price_per_person = re.search(r'(₹[\d,]+(?:–[\d,]+)?)', price_per_person).group(1) if price_per_person else "N/A"
                     except:
                         try:
-                            # Fallback to finding by CSS selector
                             price_per_person = driver.find_element(By.CSS_SELECTOR, "div.p3Ci").text
-                            # Extract the price range
                             price_per_person_match = re.search(r'(₹[\d,]+(?:–[\d,]+)?)', price_per_person)
                             price_per_person = price_per_person_match.group(1) if price_per_person_match else "N/A"
                         except:
@@ -134,7 +132,6 @@ def scrape_google_top_places(search_query, max_results=10):
                             
                             # Extract Location
                             location_lines = full_details.split('\n')
-                            # Try to find a line that looks like an address
                             location_candidates = [
                                 line for line in location_lines
                                 if any(x in line for x in ['Street', 'Road', 'Block','Lane', 'Area', 'Colony', 'Building','Floor','Rd','Level','Ln','St','No.'])
@@ -151,6 +148,11 @@ def scrape_google_top_places(search_query, max_results=10):
                         else:
                             rating = "N/A"
 
+                    # Update progress bar in Streamlit
+                    current_progress = min(len(results) / max_results, 1.0)
+                    progress_bar.progress(current_progress)
+                    progress_text.write(f"Progress: {len(results)}/{max_results} restaurants")
+                    
                     # Append restaurant data
                     results.append({
                         "Name": name,
@@ -162,7 +164,7 @@ def scrape_google_top_places(search_query, max_results=10):
                     })
 
                 except Exception as e:
-                    print(f"Error extracting details for one card: {e}")
+                    st.warning(f"Error extracting details for one restaurant: {str(e)}")
                     continue
 
             # Click "More Places" to load additional results
@@ -171,82 +173,105 @@ def scrape_google_top_places(search_query, max_results=10):
                 more_button.click()
                 time.sleep(3)
             except Exception as e:
-                print("No 'More places' button found, stopping...")
+                st.info("No more places to load. Finalizing results...")
+                progress_bar.progress(1.0)
+                progress_text.write(f"Progress: {len(results)}/{max_results} restaurants")
                 break
 
-        print(f"Successfully scraped {len(results)} places.")
+        st.success(f"Successfully scraped {len(results)} places.")
     except Exception as e:
-        print(f"Error: {e}")
+        st.error(f"Error during scraping: {str(e)}")
     finally:
         driver.quit()
         return results
 
-def save_to_csv(data, filename="google_top_places.csv"):
-    # Sort results by rating in descending order
-    sorted_data = sorted(data, key=lambda x: float(x['Rating']) if x['Rating'] != 'N/A' else 0, reverse=True)
+def main():
+    st.set_page_config(page_title="Restaurant Finder", layout="wide")
     
-    # Clean and format data before writing
-    cleaned_data = []
-    for restaurant in sorted_data:
-        # Clean up phone number
-        phone = restaurant['Phone Number'].strip() if restaurant['Phone Number'] != 'N/A' else 'Not Available'
-        
-        # Clean up location
-        location = ' '.join(restaurant['Location'].split()) if restaurant['Location'] != 'N/A' else 'Not Available'
-        
-        # Format price per person
-        price = restaurant['Price per Person'] if restaurant['Price per Person'] != 'N/A' else 'Not Available'
-        
-        # Format service options
-        services = restaurant['Service Options'] if restaurant['Service Options'] != 'N/A' else 'No specific services noted'
-        
-        cleaned_data.append({
-            "Restaurant Name": restaurant['Name'],
-            "Rating": restaurant['Rating'],
-            "Location": location,
-            "Phone Number": phone,
-            "Price Range": price,
-            "Available Services": services
-        })
+    # Title and Description
+    st.title("🍽️ Top Restaurants At Your Region")
+    st.markdown("""
+    Discover the best restaurants in your area! Enter a location and get detailed information about top-rated restaurants.
+    """)
     
-    with open(filename, "w", newline="", encoding="utf-8") as file:
+    # Create a form for user input
+    with st.form("restaurant_search_form"):
+        # Two-column layout for input fields
+        col1, col2 = st.columns(2)
         
-        fieldnames = ["Restaurant Name", "Rating", "Location", "Phone Number", "Price Range", "Available Services"]
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        with col1:
+            # Location input
+            location = st.text_input("Enter City/Region", 
+                                   placeholder="e.g., Mumbai, Delhi, Bangalore")
         
+        with col2:
+            # Max results slider
+            max_results = st.slider("Number of Restaurants to Show", 
+                                  min_value=1, 
+                                  max_value=50, 
+                                  value=3, 
+                                  step=3)
         
-        writer.writerow({
-            "Restaurant Name": "Pune's Top Restaurants",
-            "Rating": f"Total Restaurants: {len(cleaned_data)}",
-            "Location": f"Search Query: {search_query}",
-            "Phone Number": f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-            "Price Range": "",
-            "Available Services": ""
-        })
-        writer.writerow({field: field for field in fieldnames})
-        
-        # Write the actual data
-        writer.writerows(cleaned_data)
+        # Submit button
+        search_button = st.form_submit_button("Search Restaurants 🔍")
     
-    print(f"Cleaned and organized data saved to {filename}")
+    # Process the search when form is submitted
+    if search_button and location:
+        try:
+            # Show loading spinner
+            with st.spinner(f'Searching for top restaurants in {location}...'):
+                # Construct search query
+                search_query = f"Top restaurants in {location}"
+                
+                # Perform scraping
+                results = scrape_google_top_places(search_query, max_results)
+                
+                if results:
+                    # Convert results to DataFrame
+                    df = pd.DataFrame(results)
+                    df.index = range(1, len(df) + 1)
+                    
+                    # Rename columns for better display
+                    df.columns = [
+                        "Restaurant Name",
+                        "Rating",
+                        "Location",
+                        "Phone Number",
+                        "Price Range",
+                        "Available Services"
+                    ]
+                    
+                    # Success message
+                    st.success(f"Found {len(results)} restaurants in {location}!")
+                    
+                    # Display results in a table
+                    st.markdown("### 📋 Restaurant Details")
+                    st.dataframe(
+                        df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
+                    # Add download button
+                    csv = df.to_csv(index=True).encode('utf-8')
+                    st.download_button(
+                        label="Download Results as CSV",
+                        data=csv,
+                        file_name=f"restaurants_{location.lower().replace(' ', '_')}.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.error("No restaurants found. Please try a different location.")
+                    
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
+            st.warning("Please try again or try a different location.")
     
-    # Optional: Print summary to console
-    print("\n--- Restaurant Scrape Summary ---")
-    print(f"Total Restaurants Found: {len(cleaned_data)}")
-    top_5 = cleaned_data[:5]
-    print("\nTop 5 Restaurants by Rating:")
-    for idx, rest in enumerate(top_5, 1):
-        print(f"{idx}. {rest['Restaurant Name']} (Rating: {rest['Rating']})")
+    # Add footer with information
+    st.markdown("""
+    ---
+    ℹ️ *This app scrapes real-time data from Google Places. Results may vary based on availability and current Google Places data.*
+    """)
 
-# Modify the main function to pass search query
 if __name__ == "__main__":
-    search_query = "Top restaurants in Mumbai"
-    max_results = 20
-
-    print("Starting scrape for Google Top Places...")
-    scraped_data = scrape_google_top_places(search_query, max_results)
-
-    if scraped_data:
-        save_to_csv(scraped_data)
-    else:
-        print("No data scraped.")
+    main()
